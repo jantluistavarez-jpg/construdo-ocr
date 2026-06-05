@@ -9,30 +9,25 @@ app.use(cors({ origin: '*' }));
 app.use(express.json({ limit: '15mb' }));
 app.options('*', cors({ origin: '*' }));
 
+const MODEL  = 'claude-opus-4-5';
 const SYSTEM = 'Eres OCR experto en facturas dominicanas. Devuelve SOLO JSON sin markdown. Formato: {"numero":"","fecha":"YYYY-MM-DD","proveedor":"","rnc":"","ncf":"","tipo":"Material de construcción","items":[{"desc":"","cant":1,"pu":0,"sub":0}],"subtotal":0,"itbis":0,"total":0,"partida_sugerida_desc":"","confianza":90}. Tipos: Material de construcción, Hormigón premezclado, Mano de obra, Alquiler de equipo, Servicios profesionales, Transporte, Otro. Números sin comas ni símbolos.';
 
-function callAnthropic(messages, cb) {
+function callAnthropic(bodyObj, cb, usePDFBeta) {
   const API_KEY = process.env.ANTHROPIC_API_KEY;
   if (!API_KEY) return cb(new Error('ANTHROPIC_API_KEY no configurada'));
-
-  const bodyObj = {
-    model:      'claude-sonnet-4-20250514',
-    max_tokens: 1024,
-    system:     SYSTEM,
-    messages
-  };
   const body = JSON.stringify(bodyObj);
-
+  const headers = {
+    'Content-Type':      'application/json',
+    'x-api-key':         API_KEY,
+    'anthropic-version': '2023-06-01',
+    'Content-Length':    Buffer.byteLength(body)
+  };
+  if (usePDFBeta) headers['anthropic-beta'] = 'pdfs-2024-09-25';
   const req = https.request({
     hostname: 'api.anthropic.com',
     path:     '/v1/messages',
     method:   'POST',
-    headers: {
-      'Content-Type':      'application/json',
-      'x-api-key':         API_KEY,
-      'anthropic-version': '2023-06-01',
-      'Content-Length':    Buffer.byteLength(body)
-    }
+    headers
   }, (res) => {
     let data = '';
     res.on('data', chunk => data += chunk);
@@ -69,67 +64,57 @@ function parseResult(raw) {
   return obj;
 }
 
-app.get('/', (req, res) => res.json({ status: 'ok', service: 'ConstruDO OCR v2' }));
+app.get('/', (req, res) => res.json({ status: 'ok', service: 'ConstruDO OCR v2', model: MODEL }));
 
 // PDF
 app.post('/ocr/pdf', upload.single('pdf'), (req, res) => {
+  console.log('PDF recibido:', req.file ? req.file.size + ' bytes' : 'NINGUNO');
   if (!req.file) return res.status(400).json({ error: 'No se recibió PDF' });
   const b64 = req.file.buffer.toString('base64');
-  const messages = [{
-    role: 'user',
-    content: [
-      { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: b64 }},
-      { type: 'text', text: 'Extrae todos los datos de esta factura y devuelve SOLO el JSON.' }
-    ]
-  }];
-  // Intentar con PDF nativo primero, si falla enviar como texto
   const bodyObj = {
-    model: model: 'claude-opus-4-5', max_tokens: 1024, system: SYSTEM,
-    messages,
-    betas: ['pdfs-2024-09-25']
+    model: MODEL,
+    max_tokens: 1024,
+    system: SYSTEM,
+    betas: ['pdfs-2024-09-25'],
+    messages: [{
+      role: 'user',
+      content: [
+        { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: b64 }},
+        { type: 'text', text: 'Extrae todos los datos de esta factura y devuelve SOLO el JSON.' }
+      ]
+    }]
   };
-  const body = JSON.stringify(bodyObj);
-  const API_KEY = process.env.ANTHROPIC_API_KEY;
-  const httpReq = https.request({
-    hostname: 'api.anthropic.com', path: '/v1/messages', method: 'POST',
-    headers: {
-      'Content-Type': 'application/json', 'x-api-key': API_KEY,
-      'anthropic-version': '2023-06-01', 'anthropic-beta': 'pdfs-2024-09-25',
-      'Content-Length': Buffer.byteLength(body)
-    }
-  }, (apiRes) => {
-    let data = '';
-    apiRes.on('data', chunk => data += chunk);
-    apiRes.on('end', () => {
-      try {
-        const parsed = JSON.parse(data);
-        const text = (parsed.content||[]).map(c=>c.text||'').join('').trim();
-        res.json({ success: true, data: parseResult(text) });
-      } catch(e) { res.status(500).json({ error: data.slice(0,200) }); }
-    });
-  });
-  httpReq.on('error', err => res.status(500).json({ error: err.message }));
-  httpReq.write(body);
-  httpReq.end();
+  callAnthropic(bodyObj, (err, text) => {
+    if (err) return res.status(500).json({ error: err.message });
+    console.log('PDF resultado:', text.slice(0, 100));
+    res.json({ success: true, data: parseResult(text) });
+  }, true);
 });
 
 // Imagen
 app.post('/ocr/image', upload.single('image'), (req, res) => {
+  console.log('Imagen recibida:', req.file ? req.file.size + ' bytes' : 'NINGUNO');
   if (!req.file) return res.status(400).json({ error: 'No se recibió imagen' });
   const b64 = req.file.buffer.toString('base64');
   const mt  = req.file.mimetype.includes('png') ? 'image/png' :
                req.file.mimetype.includes('webp') ? 'image/webp' : 'image/jpeg';
-  const messages = [{
-    role: 'user',
-    content: [
-      { type: 'image', source: { type: 'base64', media_type: mt, data: b64 }},
-      { type: 'text', text: 'Extrae todos los datos de esta factura y devuelve SOLO el JSON.' }
-    ]
-  }];
-  callAnthropic(messages, (err, text) => {
+  const bodyObj = {
+    model: MODEL,
+    max_tokens: 1024,
+    system: SYSTEM,
+    messages: [{
+      role: 'user',
+      content: [
+        { type: 'image', source: { type: 'base64', media_type: mt, data: b64 }},
+        { type: 'text', text: 'Extrae todos los datos de esta factura y devuelve SOLO el JSON.' }
+      ]
+    }]
+  };
+  callAnthropic(bodyObj, (err, text) => {
     if (err) return res.status(500).json({ error: err.message });
+    console.log('Imagen resultado:', text.slice(0, 100));
     res.json({ success: true, data: parseResult(text) });
-  });
+  }, false);
 });
 
 const PORT = process.env.PORT || 3001;
