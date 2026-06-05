@@ -84,7 +84,7 @@ app.post('/ocr/pdf', upload.single('pdf'), (req, res) => {
   }];
   // Intentar con PDF nativo primero, si falla enviar como texto
   const bodyObj = {
-    model: 'claude-sonnet-4-20250514', max_tokens: 1024, system: SYSTEM,
+    model: model: 'claude-opus-4-5', max_tokens: 1024, system: SYSTEM,
     messages,
     betas: ['pdfs-2024-09-25']
   };
