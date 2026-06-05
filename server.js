@@ -75,7 +75,6 @@ app.post('/ocr/pdf', upload.single('pdf'), (req, res) => {
     model: MODEL,
     max_tokens: 1024,
     system: SYSTEM,
-    betas: ['pdfs-2024-09-25'],
     messages: [{
       role: 'user',
       content: [
