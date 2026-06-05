@@ -9,7 +9,7 @@ app.use(cors({ origin: '*' }));
 app.use(express.json({ limit: '15mb' }));
 app.options('*', cors({ origin: '*' }));
 
-const MODEL  = 'claude-opus-4-5';
+const MODEL  = 'claude-sonnet-4-5';
 const SYSTEM = 'Eres OCR experto en facturas dominicanas. Devuelve SOLO JSON sin markdown. Formato: {"numero":"","fecha":"YYYY-MM-DD","proveedor":"","rnc":"","ncf":"","tipo":"Material de construcción","items":[{"desc":"","cant":1,"pu":0,"sub":0}],"subtotal":0,"itbis":0,"total":0,"partida_sugerida_desc":"","confianza":90}. Tipos: Material de construcción, Hormigón premezclado, Mano de obra, Alquiler de equipo, Servicios profesionales, Transporte, Otro. Números sin comas ni símbolos.';
 
 function callAnthropic(bodyObj, cb, usePDFBeta) {
